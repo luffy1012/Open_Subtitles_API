@@ -50,14 +50,11 @@ class OpenSubAPI(object):
         return self._data.get(key) if '200' == status else None
 
 
-    def login(self,username=None,password=None):
+    def login(self,username="",password=""):
         '''Returns Token if successful else None'''
-        if username and password:
-            self._data = self._os_server.LogIn(username,password,Setting.LANGUAGE,Setting.USER_AGENT)
-            token = self._check_result('token')
-        else:
-            print 'Username and Password required!'
-            return
+        
+        self._data = self._os_server.LogIn(username,password,Setting.LANGUAGE,Setting.USER_AGENT)
+        token = self._check_result('token')
 
         if token:
             self.token = token
@@ -84,6 +81,7 @@ class OpenSubAPI(object):
             lim = limit
         else:
             lim = 10
+        result = None
         if path != None:
             self._data = self._os_server.SearchSubtitles(self.token,[{'sublanguageid':lan,'moviehash':self._get_hash(path),'moviebytesize':str(os.path.getsize(path))}],{'limit':lim})
             result = self._check_result('data')
@@ -92,8 +90,7 @@ class OpenSubAPI(object):
         if imdbid != None:
             self._data = self._os_server.SearchSubtitles(self.token,[{'sublanguageid':lan,'imdbid':imdbid}],{'limit':lim})
             result = self._check_result('data')
-            if result:
-                return result
+            return result
         if name == None and path != None:
             name = os.path.basename(path)
         if name != None:
@@ -101,20 +98,94 @@ class OpenSubAPI(object):
             result = self._check_result('data')
         return result
 
-    #TODO: Multiple Subsearch at once
+    def search_sub_list(self,path_list=None,imdbid_list=None,name_list=None,languageid=None,limit=None):
+        '''Taken an input contanining path_list or imdb_list or name_list. If the provided list is path_list and the movie
+         is not found then the movie name from the path list is used to search for the movie.
+         Returns a list contaning the info about subs of the corresponding movie. If the subs are not found for a movie then
+        the corresponding element in the return list is None.
+        '''
+        if languageid:
+            lan = languageid
+        else:
+            lan = 'eng'
+        if limit:
+            lim = limit
+        else:
+            lim = 1
+
+        query_list = []
+        result = []
+
+        if path_list!=None:
+            query_list = [{'sublanguageid':lan,'moviehash':self._get_hash(path),'moviebytesize':str(os.path.getsize(path))} for path in path_list]
+            hash_list = [query['moviehash'] for query in query_list]
+            for num in range(0,len(query_list),50):
+                self._data = self._os_server.SearchSubtitles(self.token,query_list[num:num+50])
+                result += self._check_result('data')
+
+        elif imdbid_list != None:
+            query_list = [{'sublanguageid':lan,'imdbid':imdbid} for imdbid in imdbid_list]
+            for num in range(0,len(query_list),50):
+                self._data = self._os_server.SearchSubtitles(self.token,query_list[num:num+50])
+                result += self._check_result('data')
+
+        elif name_list != None:
+            query_list = [{'sublanguageid':lan,'query':name} for name in name_list]
+            for num in range(0,len(query_list),50):
+                self._data = self._os_server.SearchSubtitles(self.token,query_list[num:num+50])
+                result += self._check_result('data')
+                
+        else:
+            return None
+        
+
+        if path_list != None:
+            final_result = []
+            i=0
+            #Using reversed so that the first MovieHash overwrites the same MovieHashes that come after it.
+            result_dict = {res['MovieHash']:res for res in reversed(result)}
+
+            for j in range(len(path_list)):
+                try:
+                    result_dict[hash_list[j]]
+                except:
+                    self._data = self._os_server.SearchSubtitles(self.token,[{'sublanguageid':lan,'query':os.path.basename(path_list[j]).lower()}],{'limit':lim})
+                    temp_result = self._check_result('data')
+                    if temp_result:
+                        final_result.append(temp_result[0])
+                    else:
+                        final_result.append(None)
+                else:
+                    final_result.append(result_dict[hash_list[j]])
+            return final_result
+        return result
+
 
     def check_movie(self,path):
         '''Check if the movie hash is present in the server
         '''
-        result = self._os_server.CheckMovieHash(self.token,[self._get_hash(path)])
-        return result
+        movie_hash = self._get_hash(path)
+        self._data = self._os_server.CheckMovieHash(self.token,[movie_hash])
+        result =  self._check_result('data')
+        if result:
+            return result[movie_hash]
+        else:
+            return None
 
     def check_movie_list(self,path_list):
         '''Check if the hash of the movies in the list are present on the server
         '''
         hash_list = [self._get_hash(path) for path in path_list]
-        result = self._os_server.CheckMovieHash(self.token,hash_list)
-        return result
+        result = {}
+        for num in range(0,len(hash_list),100):
+            self._data = self._os_server.CheckMovieHash(self.token,hash_list[num:num+100])
+            temp = self._check_result('data')
+            if temp:
+                result.update(temp)
+        if result:
+            return [result[movie_hash] for movie_hash in hash_list]
+        else:
+            return None
 
     def download_sub(self,sub_id):
         '''Return as dict with subtitleid as key and the corresponding subtitle file as its value
@@ -129,11 +200,15 @@ class OpenSubAPI(object):
         else:
             return None
 
-    def downoad_sub_list(self,sub_id_list):
+    def download_sub_list(self,sub_id_list):
         '''Returns a dict with subtitleid as key and the corresponding subtitle file as its value
         '''
-        self._data = self._os_server.DownloadSubtitles(self.token,sub_id_list)
-        data = self._check_result('data')
+        data = []
+        for num in range(0,len(sub_id_list),20):
+            self._data = self._os_server.DownloadSubtitles(self.token,sub_id_list[num:num+20])
+            result = self._check_result('data')
+            if result:
+                data+=result
         if data:
             return {subs['idsubtitlefile']:zlib.decompress(base64.decodestring(subs['data']),16+zlib.MAX_WBITS) for subs in data} 
         else:
@@ -145,7 +220,7 @@ class OpenSubAPI(object):
         result = self._check_result('data')
         if result:
             #!!! CHECK !!!#
-            return result[0]['BestGuess']['IDMovieIMDB']
+            return result[name]['BestGuess']
 
     def _get_hash(self,path):
         longlongformat = 'q'  # long long
