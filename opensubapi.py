@@ -71,7 +71,7 @@ class OpenSubAPI(object):
         return '200' in self._data.get('status')
 
     def search_sub(self,path=None,imdbid=None,name=None,languageid=None,limit=None):
-        '''Searches subtitles. Preference order- hash>imdbid>filename
+        '''Searches subtitles using any-one given of path,imdbid,name
         '''
         if languageid:
             lan = languageid
@@ -91,18 +91,13 @@ class OpenSubAPI(object):
             self._data = self._os_server.SearchSubtitles(self.token,[{'sublanguageid':lan,'imdbid':imdbid}],{'limit':lim})
             result = self._check_result('data')
             return result
-        if name == None and path != None:
-            name = os.path.basename(path)
         if name != None:
             self._data = self._os_server.SearchSubtitles(self.token,[{'sublanguageid':lan,'query':name}],{'limit':lim})
             result = self._check_result('data')
         return result
 
     def search_sub_list(self,path_list=None,imdbid_list=None,name_list=None,languageid=None,limit=None):
-        '''Taken an input contanining path_list or imdb_list or name_list. If the provided list is path_list and the movie
-         is not found then the movie name from the path list is used to search for the movie.
-         Returns a list contaning the info about subs of the corresponding movie. If the subs are not found for a movie then
-        the corresponding element in the return list is None.
+        '''Searches Subtitles using any of path_list,imdbid_list,name_list whichever is provided
         '''
         if languageid:
             lan = languageid
@@ -138,26 +133,6 @@ class OpenSubAPI(object):
         else:
             return None
         
-
-        if path_list != None:
-            final_result = []
-            i=0
-            #Using reversed so that the first MovieHash overwrites the same MovieHashes that come after it.
-            result_dict = {res['MovieHash']:res for res in reversed(result)}
-
-            for j in range(len(path_list)):
-                try:
-                    result_dict[hash_list[j]]
-                except:
-                    self._data = self._os_server.SearchSubtitles(self.token,[{'sublanguageid':lan,'query':os.path.basename(path_list[j]).lower()}],{'limit':lim})
-                    temp_result = self._check_result('data')
-                    if temp_result:
-                        final_result.append(temp_result[0])
-                    else:
-                        final_result.append(None)
-                else:
-                    final_result.append(result_dict[hash_list[j]])
-            return final_result
         return result
 
 
